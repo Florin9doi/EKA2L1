@@ -61,6 +61,7 @@ namespace eka2l1::loader {
     };
 
     struct mbm_file {
+        bool is_rom_version;
         mbm_header header;
         mbm_trailer trailer;
 

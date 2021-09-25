@@ -44,7 +44,8 @@ namespace eka2l1::loader {
     }
 
     bool mbm_file::valid() {
-        return (header.uids.uid1 == 0x10000037) && (header.uids.uid2 == 0x10000042);
+        return header.uids.uid1 == 0x10000041
+			|| (header.uids.uid1 == 0x10000037 && header.uids.uid2 == 0x10000042);
     }
 
     bool mbm_file::is_header_loaded(const std::size_t index) const {
@@ -52,8 +53,17 @@ namespace eka2l1::loader {
     }
 
     bool mbm_file::do_read_headers() {
-        if (stream->read(&header, sizeof(header)) != sizeof(header)) {
+        if (stream->read(&header, sizeof(uint32_t)) != sizeof(uint32_t)) {
             return false;
+        }
+        if (header.uids.uid1 == 0x10000041) {
+            is_rom_version = true;
+            header.trailer_off = 4;
+        } else {
+            stream->seek(0, common::seek_where::beg);
+            if (stream->read(&header, sizeof(header)) != sizeof(header)) {
+                return false;
+            }
         }
 
         stream->seek(header.trailer_off, common::seek_where::beg);
@@ -79,8 +89,12 @@ namespace eka2l1::loader {
                 return false;
             }
 
-            // Remember the current offseet first
-            stream->seek(trailer.sbm_offsets[index], common::seek_where::beg);
+            // Remember the current offset first
+            if (is_rom_version) {
+                stream->seek(trailer.sbm_offsets[index] + 5 * sizeof(std::uint32_t), common::seek_where::beg);
+            } else {
+                stream->seek(trailer.sbm_offsets[index], common::seek_where::beg);
+            }
 
             if (!sbm_headers[index].internalize(*stream)) {
                 return false;
@@ -121,7 +135,9 @@ namespace eka2l1::loader {
             return (dest == nullptr) ? true : false;
         }
 
-        const std::size_t data_offset = trailer.sbm_offsets[index] + single_bm_header.header_len;
+        std::size_t data_offset = trailer.sbm_offsets[index] + single_bm_header.header_len;
+        if (is_rom_version)
+            data_offset += 7 * sizeof(std::uint32_t);
         const std::size_t size_to_get = common::min<std::size_t>(dest_max, single_bm_header.bitmap_size - single_bm_header.header_len);
 
         const auto crr_pos = stream->tell();
@@ -149,7 +165,9 @@ namespace eka2l1::loader {
         }
 
         sbm_header &single_bm_header = sbm_headers[index];
-        const std::size_t data_offset = trailer.sbm_offsets[index] + single_bm_header.header_len;
+        std::size_t data_offset = trailer.sbm_offsets[index] + single_bm_header.header_len;
+        if (is_rom_version)
+            data_offset += 7 * sizeof(std::uint32_t);
 
         const auto crr_pos = stream->tell();
         stream->seek(data_offset, common::beg);
@@ -157,7 +175,7 @@ namespace eka2l1::loader {
         bool success = true;
 
         std::size_t compressed_size = common::min<std::size_t>(static_cast<std::size_t>(stream->left()),
-            static_cast<std::size_t>(single_bm_header.bitmap_size));
+            static_cast<std::size_t>(single_bm_header.bitmap_size - single_bm_header.header_len));
 
         common::wo_buf_stream dest_stream(dest, dest_max ? dest_max : 0xFFFFFFFF);
 
